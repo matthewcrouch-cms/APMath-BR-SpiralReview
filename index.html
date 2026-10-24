@@ -466,7 +466,7 @@ function teacherGate(){
   const msg=h("p",{class:"muted"},"");
   function go(){ if(input.value===CONFIG.teacherPin) teacherDash(); else msg.textContent="That PIN is not right. Try again."; }
   input.addEventListener("keydown",e=>{ if(e.key==="Enter") go(); });
-  show(h("h2",null,"Teacher view"),h("p",{class:"lede"},"Enter the PIN to see department results. (Sample PIN: 1234.)"),
+  show(h("h2",null,"Teacher view"),h("p",{class:"lede"},"Enter the PIN to see department results."),
     input,h("div",{class:"row"},h("button",{class:"btn",type:"button",onclick:go},"Open dashboard")),msg);
   input.focus();
 }
