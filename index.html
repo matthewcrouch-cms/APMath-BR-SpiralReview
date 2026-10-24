@@ -460,7 +460,7 @@ function studentResult(w,row,revisit){
 }
 
 /* ============ TEACHER VIEW ============ */
-let T={week:1,teacherId:"crouch",openSection:null};
+let T={course:"stats",teacherId:"all",week:1,weekPicked:false,openSection:null};
 function teacherGate(){
   const input=h("input",{type:"password",placeholder:"Teacher PIN",autocomplete:"off","aria-label":"Teacher PIN",inputmode:"numeric"});
   const msg=h("p",{class:"muted"},"");
@@ -500,16 +500,25 @@ function teacherDash(){
     refreshRemote().then(()=>{ T.syncing=false; if(document.querySelector("h2")&&document.querySelector("h2").textContent==="Department results") teacherDash(); });
   }
   const all=firstAttempts(allRows());
-  const wk=T.week;
-  const weekRows=all.filter(r=>r.week===wk);
-  const stats=TEACHERS.map(t=>{
-    const rs=weekRows.filter(r=>r.teacherId===t.id);
-    const size=rosterSize(t);
-    return {t,done:rs.length,size,part:size?rs.length/size:null,avg:rs.length?rs.reduce((a,r)=>a+r.score,0)/rs.length/3:null};
-  });
-  const totalDone=stats.reduce((a,s)=>a+s.done,0), totalSize=stats.reduce((a,s)=>a+s.size,0);
-  const allScores=weekRows;
-  const deptAvg=allScores.length?allScores.reduce((a,r)=>a+r.score,0)/allScores.length/3:null;
+  const info=COURSES.map(c=>({c,ts:TEACHERS.filter(t=>t.course===c.id&&t.sections.length>0),
+    ready:BANK[c.id].length>0&&TEACHERS.some(t=>t.course===c.id&&t.sections.length>0)}));
+  const cur=info.find(x=>x.c.id===T.course)||info[0];
+  const cts=cur.ts;
+  if(T.teacherId!=="all"&&!cts.some(t=>t.id===T.teacherId)) T.teacherId="all";
+  const scopeTs=T.teacherId==="all"?cts:cts.filter(t=>t.id===T.teacherId);
+  const scopeIds=new Set(scopeTs.map(t=>t.id));
+  const courseRows=all.filter(r=>cts.some(t=>t.id===r.teacherId));
+  if(!T.weekPicked) T.week=courseRows.length?Math.max(...courseRows.map(r=>r.week)):1;
+  const sets=BANK[cur.c.id];
+  const wkDef=sets.find(w=>w.week===T.week)||sets[0];
+  const wk=wkDef.week;
+  const scopeRows=all.filter(r=>scopeIds.has(r.teacherId));
+  const weekRows=scopeRows.filter(r=>r.week===wk);
+  const avgOf=rs=>rs.length?rs.reduce((a,r)=>a+r.score,0)/rs.length/3:null;
+  const size=scopeTs.reduce((n,t)=>n+rosterSize(t),0);
+  const cell=(f,label)=>f==null?"—":h("div",{style:"display:flex;gap:10px;align-items:center"},
+    h("div",{class:"bar"+(f<.6?" low":"")},h("span",{style:"width:"+Math.round(f*100)+"%"})),h("span",null,label||pct(f)));
+  const table=(heads,rows)=>h("div",{class:"scroll"},h("table",null,h("thead",null,h("tr",null,heads.map(x=>h("th",null,x)))),h("tbody",null,rows)));
   const hasData=allRows().length>0;
   const demoOn=loadAll().some(r=>r.demo);
   const src=!CONFIG.sheetCsvUrl?"Results saved in this browser only."
@@ -517,78 +526,82 @@ function teacherDash(){
     :remoteStatus.startsWith("ok")?"Shared results from the Sheet, checked at "+remoteStatus.slice(3)+". New submissions can take a few minutes to appear."
     :"Could not reach the shared Sheet, so only results saved in this browser are showing.";
 
-  const weekSel=h("select",{"aria-label":"Set",onchange:e=>{T.week=+e.target.value;T.openSection=null;teacherDash();}},
-    BANK.stats.map(w=>h("option",{value:w.week,selected:w.week===wk},"Set "+w.week+": "+w.title)));
-  const tSel=h("select",{"aria-label":"Teacher",onchange:e=>{T.teacherId=e.target.value;T.openSection=null;teacherDash();}},
-    TEACHERS.filter(t=>t.sections.length).map(t=>h("option",{value:t.id,selected:t.id===T.teacherId},t.name+" ("+t.courseName+")")));
+  const tabs=h("div",{class:"row"},info.map(x=>h("button",{class:"btn small"+(x.c.id===cur.c.id?"":" ghost"),type:"button",disabled:!x.ready,
+    onclick:()=>{T.course=x.c.id;T.teacherId="all";T.weekPicked=false;T.openSection=null;teacherDash();}},x.c.name+(x.ready?"":" (not set up yet)"))));
+  const tSel=cts.length>1?h("select",{"aria-label":"Teacher",onchange:e=>{T.teacherId=e.target.value;T.openSection=null;teacherDash();}},
+    [h("option",{value:"all",selected:T.teacherId==="all"},"All "+cur.c.name+" teachers")].concat(
+      cts.map(t=>h("option",{value:t.id,selected:t.id===T.teacherId},t.name+(t.placeholder?" (placeholder roster)":""))))):
+    h("span",{class:"muted"},"Teacher: "+(cts[0]?cts[0].name:"none"));
+  const wSel=h("select",{"aria-label":"Set",onchange:e=>{T.week=+e.target.value;T.weekPicked=true;T.openSection=null;teacherDash();}},
+    sets.map(w=>h("option",{value:w.week,selected:w.week===wk},"Set "+w.week+": "+w.title)));
+  const scopeName=cur.c.name+", "+(scopeTs.length===1?scopeTs[0].name:"all teachers")+", Set "+wk;
 
-  const teacherTable=h("div",{class:"scroll"},h("table",null,
-    h("thead",null,h("tr",null,["Teacher","Course","Completed","Participation","Average score"].map(x=>h("th",null,x)))),
-    h("tbody",null,stats.map(s=>h("tr",null,
-      h("td",null,h("strong",null,s.t.name),s.t.placeholder?h("span",{class:"tag warn",style:"margin-left:8px"},"Placeholder roster"):null),
-      h("td",null,s.t.courseName),
-      h("td",null,s.size?s.done+" of "+s.size:"Roster not loaded"),
-      h("td",null,s.part==null?"—":h("div",{style:"display:flex;gap:10px;align-items:center"},
-        h("div",{class:"bar"+(s.part<.6?" low":"")},h("span",{style:"width:"+Math.round(s.part*100)+"%"})),h("span",null,pct(s.part)))),
-      h("td",null,s.avg==null?"—":pct(s.avg)))))));
+  const done=weekRows.length, avg=avgOf(weekRows);
+  const cards=h("div",{class:"cards"},
+    h("div",{class:"stat"},h("div",{class:"n"},size?pct(done/size):"—"),h("div",{class:"l"},done+" of "+size+" students completed Set "+wk)),
+    h("div",{class:"stat"},h("div",{class:"n"},avg==null?"—":pct(avg)),h("div",{class:"l"},"Average score on Set "+wk)));
 
-  const tc=teacherById(T.teacherId);
-  const secRows=tc.sections.map(s=>{
-    const rs=weekRows.filter(r=>r.teacherId===tc.id&&r.sectionId===s.id);
-    return {s,done:rs.length,size:s.roster.length,avg:rs.length?rs.reduce((a,r)=>a+r.score,0)/rs.length/3:null,rs};
-  });
-  const secTable=h("div",{class:"scroll"},h("table",null,
-    h("thead",null,h("tr",null,["Class","Completed","Participation","Average score"].map(x=>h("th",null,x)))),
-    h("tbody",null,secRows.map(r=>h("tr",{class:"click",tabindex:"0",onclick:()=>{T.openSection=T.openSection===r.s.id?null:r.s.id;teacherDash();},
-        onkeydown:e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();T.openSection=T.openSection===r.s.id?null:r.s.id;teacherDash();}}},
-      h("td",null,h("strong",null,r.s.name)),h("td",null,r.done+" of "+r.size),
-      h("td",null,h("div",{style:"display:flex;gap:10px;align-items:center"},
-        h("div",{class:"bar"+(r.done/r.size<.6?" low":"")},h("span",{style:"width:"+Math.round(r.done/r.size*100)+"%"})),h("span",null,pct(r.done/r.size)))),
-      h("td",null,r.avg==null?"—":pct(r.avg)))))));
+  const teacherTable=scopeTs.length>1?table(["Teacher","Completed","Participation","Average score"],scopeTs.map(t=>{
+    const rs=weekRows.filter(r=>r.teacherId===t.id), sz=rosterSize(t);
+    return h("tr",null,h("td",null,h("strong",null,t.name),t.placeholder?h("span",{class:"tag warn",style:"margin-left:8px"},"Placeholder roster"):null),
+      h("td",null,rs.length+" of "+sz),h("td",null,cell(sz?rs.length/sz:null)),h("td",null,avgOf(rs)==null?"—":pct(avgOf(rs))));
+  })):null;
 
+  const classes=scopeTs.flatMap(t=>t.sections.map(s=>{
+    const rs=weekRows.filter(r=>r.teacherId===t.id&&r.sectionId===s.id);
+    return {t,s,key:t.id+"|"+s.id,rs,size:s.roster.length};
+  }));
+  const toggle=key=>{T.openSection=T.openSection===key?null:key;teacherDash();};
+  const multi=scopeTs.length>1;
+  const classTable=table((multi?["Teacher"]:[]).concat(["Class","Completed","Participation","Average score"]),classes.map(c=>
+    h("tr",{class:"click",tabindex:"0",onclick:()=>toggle(c.key),onkeydown:e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle(c.key);}}},
+      multi?h("td",null,c.t.name):null,h("td",null,h("strong",null,c.s.name)),h("td",null,c.rs.length+" of "+c.size),
+      h("td",null,cell(c.size?c.rs.length/c.size:null)),h("td",null,avgOf(c.rs)==null?"—":pct(avgOf(c.rs))))));
   let missing=null;
   if(T.openSection){
-    const r=secRows.find(x=>x.s.id===T.openSection);
-    if(r){
-      const doneNames=new Set(r.rs.map(x=>x.student));
-      const miss=r.s.roster.filter(p=>!doneNames.has(labelFor(r.s,p))).map(nameOf);
-      missing=h("div",null,h("h3",null,"Class "+r.s.name+": not yet completed ("+miss.length+")"),
-        miss.length?h("div",{class:"pill-list"},miss.map(n=>h("span",{class:"tag warn"},n))):h("p",{class:"muted"},"Everyone has completed this week."));
+    const c=classes.find(x=>x.key===T.openSection);
+    if(c){
+      const doneNames=new Set(c.rs.map(x=>x.student));
+      const miss=c.s.roster.filter(p=>!doneNames.has(labelFor(c.s,p))).map(nameOf);
+      missing=h("div",null,h("h3",null,(multi?c.t.name+" ":"")+"Class "+c.s.name+": not yet completed ("+miss.length+")"),
+        miss.length?h("div",{class:"pill-list"},miss.map(n=>h("span",{class:"tag warn"},n))):h("p",{class:"muted"},"Everyone has completed this set."));
     }
   }
-
-  const wkDef=BANK.stats.find(w=>w.week===wk);
-  const qRows=wkDef.questions.map((q,i)=>{
-    const rs=weekRows.filter(r=>TEACHERS.find(t=>t.id===r.teacherId).course==="stats");
-    const c=rs.filter(r=>r.flags[i]===1).length;
-    return {q,n:rs.length,rate:rs.length?c/rs.length:null};
-  });
-  const qTable=h("div",{class:"scroll"},h("table",null,
-    h("thead",null,h("tr",null,["Question","Topic","Percent correct"].map(x=>h("th",null,x)))),
-    h("tbody",null,qRows.map((r,i)=>h("tr",null,h("td",null,"Question "+(i+1)),h("td",null,r.q.topic),
-      h("td",null,r.rate==null?"—":h("div",{style:"display:flex;gap:10px;align-items:center"},
-        h("div",{class:"bar"+(r.rate<.6?" low":"")},h("span",{style:"width:"+Math.round(r.rate*100)+"%"})),h("span",null,pct(r.rate)+" ("+r.n+" students)"))))))));
+  const qTable=table(["Question","Topic","Percent correct"],wkDef.questions.map((q,i)=>{
+    const c=weekRows.filter(r=>r.flags[i]===1).length, f=weekRows.length?c/weekRows.length:null;
+    return h("tr",null,h("td",null,"Question "+(i+1)),h("td",null,q.topic),h("td",null,cell(f,pct(f||0)+" ("+weekRows.length+" students)")));
+  }));
+  const setsTable=table(["Set","Completed","Participation","Average score"],sets.map(w=>{
+    const rs=scopeRows.filter(r=>r.week===w.week);
+    const pick=()=>{T.week=w.week;T.weekPicked=true;T.openSection=null;teacherDash();};
+    return h("tr",{class:"click",tabindex:"0",onclick:pick,onkeydown:e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();pick();}}},
+      h("td",null,w.week===wk?h("strong",null,"Set "+w.week+": "+w.title):"Set "+w.week+": "+w.title),
+      h("td",null,rs.length+" of "+size),h("td",null,cell(size?rs.length/size:null)),h("td",null,avgOf(rs)==null?"—":pct(avgOf(rs))));
+  }));
 
   show(
     h("h2",null,"Department results"),
-    h("p",{class:"lede"},"Participation is students who completed the check divided by roster size. Scores use each student’s first submission."),
-    h("p",{class:"muted"},src+(demoOn?" Sample data is also showing (this browser only).":"")),
+    tabs,
+    h("div",{class:"row"},tSel,wSel,CONFIG.sheetCsvUrl?h("button",{class:"btn small",type:"button",onclick:()=>{T.synced=false;teacherDash();}},"Refresh results"):null),
+    h("p",{class:"muted"},scopeName+". "+src+(demoOn?" Sample data is also showing (this browser only).":"")),
     !hasData?h("p",{class:"notice"},"No responses yet. Load sample data to preview the dashboard, or have a student complete a set."):null,
-    h("div",{class:"row"},weekSel,
-      CONFIG.sheetCsvUrl?h("button",{class:"btn small",type:"button",onclick:()=>{T.synced=false;teacherDash();}},"Refresh results"):null,
+    cards,
+    teacherTable?h("h3",null,"By teacher"):null,teacherTable,
+    h("h3",null,"By class"),
+    h("p",{class:"muted"},"Select a class row to see who has not completed this set."),
+    classTable,missing||null,
+    h("h3",null,"Question results for Set "+wk),qTable,
+    h("h3",null,"All sets at a glance"),
+    h("p",{class:"muted"},"Select a row to look at that set."),
+    setsTable,
+    h("h3",null,"Sample data"),
+    h("div",{class:"row"},
       h("button",{class:"btn small ghost",type:"button",onclick:()=>{seedDemo();teacherDash();}},"Load sample data"),
       h("button",{class:"btn small ghost",type:"button",onclick:()=>{saveAll(loadAll().filter(r=>!r.demo));teacherDash();}},"Remove sample data"),
-      h("button",{class:"btn small ghost",type:"button",onclick:()=>{ if(confirm("Delete the responses saved in this browser? Shared results in the Sheet are not affected.")){saveAll([]);teacherDash();} }},"Clear this browser")),
-    h("div",{class:"cards"},
-      h("div",{class:"stat"},h("div",{class:"n"},totalSize?pct(totalDone/totalSize):"—"),h("div",{class:"l"},"Department participation ("+totalDone+" of "+totalSize+" students on loaded rosters)")),
-      h("div",{class:"stat"},h("div",{class:"n"},deptAvg==null?"—":pct(deptAvg)),h("div",{class:"l"},"Average score across all completed checks"))),
-    h("h3",null,"By teacher"),teacherTable,
-    h("h3",null,"Question results (AP Statistics)"),qTable,
-    h("h3",null,"By class"),
-    h("div",{class:"row"},tSel,h("span",{class:"muted"},"Select a class row to see who has not completed it.")),
-    secTable,missing||null
+      h("button",{class:"btn small ghost",type:"button",onclick:()=>{ if(confirm("Delete the responses saved in this browser? Shared results in the Sheet are not affected.")){saveAll([]);teacherDash();} }},"Clear this browser"))
   );
 }
+
 
 studentCourse();
 </script>
